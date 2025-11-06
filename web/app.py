@@ -4,6 +4,17 @@ from joblib import load
 import pandas as pd
 import numpy as np # Sử dụng cho việc làm tròn và giới hạn
 
+# --- Cấu hình Matplotlib (Phải ở trước import plt) ---
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+# ---
+import io
+import base64 # Dùng để mã hóa ảnh, gửi sang HTML
+from sklearn.preprocessing import StandardScaler 
+from sklearn.cluster import KMeans
+import warnings
+
 # Khởi tạo ứng dụng Flask
 app = Flask(__name__)
 
@@ -97,10 +108,10 @@ def predict():
         
         # Trả kết quả về trang HTML, giữ lại giá trị đã nhập
         return render_template('index.html', 
-                                prediction_text=f'{final_g3} / 20',
-                                score_group=score_group,
-                                risk_factors=risk_factors,
-                                g1=data[0], g2=data[1], studytime=data[2], absences=data[3], failures=data[4])
+                               prediction_text=f'{final_g3} / 20',
+                               score_group=score_group,
+                               risk_factors=risk_factors,
+                               g1=data[0], g2=data[1], studytime=data[2], absences=data[3], failures=data[4])
 
     except ValueError:
         # Xử lý lỗi nếu người dùng nhập ký tự không phải số
@@ -109,6 +120,147 @@ def predict():
         # Xử lý lỗi hệ thống
         return render_template('index.html', error_message=f'Lỗi hệ thống không xác định: {str(e)}')
 
+# ======================================================================
+# --- PHẦN K-Means (Gộp lại) ---
+# ======================================================================
+
+# 1. Hàm Tải và Tiền xử lý Dữ liệu
+def load_and_preprocess_data():
+    file_path = 'data/student-mat.csv' # Đảm bảo thư mục 'data' ngang hàng với 'app.py'
+    try:
+        df_raw = pd.read_csv(file_path, sep=';')
+    except FileNotFoundError:
+        print(f"Lỗi: Không tìm thấy file tại '{file_path}'")
+        return None
+    df = df_raw.copy()
+    try:
+        df['G1'] = pd.to_numeric(df['G1'])
+        df['G2'] = pd.to_numeric(df['G2'])
+    except ValueError as e:
+        print(f"Lỗi khi chuyển đổi cột điểm: {e}")
+        return None
+    cols_to_map = ['schoolsup', 'famsup', 'paid', 'activities', 'nursery', 'higher', 'internet', 'romantic']
+    for col in cols_to_map:
+        if col in df.columns:
+            df[col] = df[col].map({'yes': 1, 'no': 0})
+    return df
+
+# 2. Hàm Phụ trợ để tạo biểu đồ và chuyển sang Base64
+def create_elbow_plot_base64(X_scaled):
+    inertia = []
+    K_range = range(2, 11)
+    for k in K_range:
+        kmeans_elbow = KMeans(n_clusters=k, random_state=42, n_init=10).fit(X_scaled)
+        inertia.append(kmeans_elbow.inertia_)
+    fig, ax = plt.subplots()
+    ax.plot(K_range, inertia, 'bo-')
+    ax.set_xlabel('Số cụm (K)')
+    ax.set_ylabel('Inertia')
+    ax.grid(True)
+    img = io.BytesIO()
+    fig.savefig(img, format='png', bbox_inches='tight')
+    img.seek(0)
+    plt.close(fig)
+    plot_base64 = base64.b64encode(img.getvalue()).decode('utf-8')
+    return f"data:image/png;base64,{plot_base64}"
+
+# 3. *** ĐÃ XÓA ROUTE /clusters ***
+
+# --- PHẦN PHÂN CỤM TÙY CHỈNH (Giờ là trang duy nhất) ---
+
+# 1. Định nghĩa các cột có thể phân tích
+NUMERIC_COLS = ['age', 'Medu', 'Fedu', 'traveltime', 'studytime', 'failures', 
+                'famrel', 'freetime', 'goout', 'Dalc', 'Walc', 'health', 
+                'absences', 'G1', 'G2', 'G3']
+YES_NO_COLS = ['schoolsup', 'famsup', 'paid', 'activities', 'nursery', 
+               'higher', 'internet', 'romantic']
+ALL_ANALYZABLE_COLS = sorted(NUMERIC_COLS + YES_NO_COLS)
+
+FEATURE_DESCRIPTIONS = {
+    'age': 'Tuổi', 'Medu': 'Học vấn mẹ', 'Fedu': 'Học vấn cha',
+    'traveltime': 'Thời gian đi lại', 'studytime': 'Thời gian học/tuần',
+    'failures': 'Số lần trượt môn', 'famrel': 'Quan hệ gia đình',
+    'freetime': 'Thời gian rảnh', 'goout': 'Đi chơi với bạn',
+    'Dalc': 'Uống rượu ngày thường', 'Walc': 'Uống rượu cuối tuần',
+    'health': 'Sức khỏe', 'absences': 'Số buổi vắng',
+    'G1': 'Điểm kỳ 1', 'G2': 'Điểm kỳ 2', 'G3': 'Điểm cuối kỳ',
+    'schoolsup': 'Hỗ trợ thêm từ trường', 'famsup': 'Hỗ trợ từ gia đình',
+    'paid': 'Học thêm trả phí', 'activities': 'Hoạt động ngoại khóa',
+    'nursery': 'Đã đi nhà trẻ', 'higher': 'Muốn học cao hơn',
+    'internet': 'Có Internet ở nhà', 'romantic': 'Đang yêu'
+}
+
+# 2. Tạo route mới cho trang Tùy chỉnh (Giữ nguyên logic từ lần trước)
+@app.route('/interactive', methods=['GET', 'POST'])
+def interactive_cluster():
+    # Khởi tạo các biến
+    results = {}
+    error_msg = None
+    
+    # Khi người dùng GỬI YÊU CẦU (nhấn 1 trong 2 nút)
+    if request.method == 'POST':
+        try:
+            # 1. Lấy data từ form
+            action = request.form.get('action') # Lấy tên của nút đã nhấn
+            selected_features = request.form.getlist('features') # Lấy list các checkbox
+            k = int(request.form.get('k_clusters', 3)) # Lấy K, mặc định là 3
+
+            # "Nhớ" lại các lựa chọn của người dùng để hiển thị lại
+            results['selected_cols'] = selected_features
+            results['selected_k'] = k
+            
+            if not selected_features:
+                raise ValueError("Bạn chưa chọn bất kỳ feature nào.")
+
+            # --- Chạy các bước chung cho CẢ HAI NÚT ---
+            
+            # 2. Tải và xử lý data
+            df = load_and_preprocess_data()
+            if df is None:
+                raise Exception("Không thể tải dữ liệu.")
+            
+            # 3. Lấy đúng các cột đã chọn
+            X_custom = df[selected_features].copy()
+            
+            # 4. Hiển thị bảng data gốc (5 dòng đầu)
+            results['selected_data_html'] = X_custom.head().to_html(classes='table table-striped table-hover', justify='center')
+            
+            # 5. Chuẩn hóa
+            scaler = StandardScaler()
+            X_custom_scaled = scaler.fit_transform(X_custom)
+            
+            # 6. Hiển thị bảng data đã chuẩn hóa (5 dòng đầu)
+            scaled_df_head = pd.DataFrame(X_custom_scaled, columns=selected_features).head()
+            results['scaled_data_html'] = scaled_df_head.round(3).to_html(classes='table table-striped table-hover', justify='center')
+            
+            # 7. Chạy Elbow (để vẽ)
+            results['plot_img'] = create_elbow_plot_base64(X_custom_scaled)
+            
+            # --- Chỉ chạy bước cuối nếu nhấn nút "Run Cluster" ---
+            if action == 'run_cluster':
+                if k < 2 or k > 10:
+                    raise ValueError("Số cụm (K) phải nằm trong khoảng 2 đến 10.")
+                
+                # 8. Chạy K-Means (với K người dùng chọn)
+                kmeans = KMeans(n_clusters=k, random_state=42, n_init=10).fit(X_custom_scaled)
+                df['custom_cluster'] = kmeans.labels_
+                profile = df.groupby('custom_cluster')[selected_features].mean()
+                results['table_html'] = profile.T.round(2).to_html(classes='table table-striped table-hover')
+            
+            # 'get_k' không cần làm gì thêm, chỉ hiển thị 3 bước trên
+
+        except Exception as e:
+            # Nếu lỗi, gửi thông báo lỗi
+            error_msg = f"Lỗi Xảy Ra: {e}"
+    
+    # Khi MỚI VÀO TRANG (GET) hoặc sau khi xử lý (POST)
+    return render_template('interactive.html', 
+                           all_cols=ALL_ANALYZABLE_COLS, 
+                           descriptions=FEATURE_DESCRIPTIONS, 
+                           results=results,
+                           error_msg=error_msg)
+
+# --- Chạy ứng dụng ---
 if __name__ == '__main__':
     # Chạy ứng dụng web
     app.run(debug=True)

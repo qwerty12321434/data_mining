@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Phân Cụm Tùy Chỉnh (K-Means)</title>
+    <style>
+        body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: #f8f9fa; }
+        .container { max-width: 1000px; margin: auto; padding: 20px; }
+        h2 { color: #007bff; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        h3 { color: #17a2b8; margin-top: 30px; }
+        h4 { color: #343a40; }
+        .cluster-section {
+            background: #ffffff;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            padding: 25px;
+            margin-bottom: 30px;
+        }
+        .table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .table th, .table td { padding: 12px; border: 1px solid #dee2e6; text-align: center; }
+        .table th { background-color: #f1f1f1; }
+        /* --- NAVBAR CSS (Đã sửa) --- */
+        .navbar {
+            background-color: #343a40;
+            padding: 15px 30px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: center;
+        }
+        .navbar a {
+            color: white;
+            text-decoration: none;
+            font-size: 18px;
+            padding: 10px 20px;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        .navbar a:hover { background-color: #495057; }
+        .navbar a.active { background-color: #007bff; font-weight: bold; }
+        
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr); /* 3 cột */
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .form-grid label {
+            display: block;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .form-grid label:hover { background: #e9ecef; }
+        .feature-desc {
+            font-size: 0.85em; 
+            color: #6c757d; 
+            margin-left: 5px;
+            display: block;
+        }
+        .form-control {
+            width: 100px;
+            padding: 10px;
+            border: 1px solid #ced4da;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        /* Nút màu Xanh */
+        .btn-submit {
+            width: 100%; 
+            margin-top: 20px; 
+            padding: 12px; 
+            background-color: #28a745; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+            font-size: 18px;
+            cursor: pointer;
+        }
+        .btn-submit:hover { background-color: #218838; }
+        
+        /* Nút màu Xanh dương (Blue) cho nút "Get K" */
+        .btn-primary {
+            width: 100%; 
+            margin-top: 20px; 
+            padding: 12px; 
+            background-color: #007bff; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+            font-size: 18px;
+            cursor: pointer;
+        }
+        .btn-primary:hover { background-color: #0056b3; }
+
+        /* --- CSS MỚI CHO PRESET --- */
+        .preset-buttons {
+            display: flex;
+            flex-wrap: wrap; /* Cho phép rớt dòng trên di động */
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .btn-preset {
+            padding: 8px 12px;
+            font-size: 14px;
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .btn-preset:hover { background-color: #5a6268; }
+        /* --- HẾT CSS MỚI --- */
+
+        .error-msg {
+            color: #dc3545;
+            font-weight: bold;
+            margin-top: 15px;
+            background: #f8d7da;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        details {
+            background: #fdfdfd;
+            border: 1px solid #eee;
+            border-radius: 5px;
+            margin-top: 15px;
+        }
+        summary {
+            cursor: pointer;
+            padding: 12px 15px;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        details[open] > summary {
+            border-bottom: 1px solid #eee;
+        }
+        .details-content {
+            padding: 15px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <a href="/">Trang Dự Đoán (Hồi quy)</a>
+        <a href="/interactive" class="active">Trang Phân Cụm (K-Means)</a>
+    </div>
+
+    <div class="container">
+        <h2>Phân Cụm Tùy Chỉnh (K-Means)</h2>
+
+        <form action="/interactive" method="post" class="cluster-section" id="clusterForm">
+            
+            <h4>Bước 1: Chọn các Features để Phân tích</h4>
+            
+            <p>Hoặc chọn nhanh một bộ demo (preset):</p>
+            <div class="preset-buttons">
+                <button type="button" class="btn-preset" id="preset1">Demo 1: Học tập</button>
+                <button type="button" class="btn-preset" id="preset2">Demo 2: Lối sống</button>
+                <button type="button" class="btn-preset" id="preset3">Demo 3: Gia đình</button>
+            </div>
+            <div class="form-grid" id="featuresGrid">
+                {% for col in all_cols %}
+                <label>
+                    <input type="checkbox" name="features" value="{{ col }}"
+                    {% if results and col in results.selected_cols %} checked {% endif %}>
+                    <strong>{{ col }}</strong>
+                    <span class="feature-desc">{{ descriptions.get(col, '') }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            
+            <button type="submit" name="action" value="get_k" class="btn-primary">
+                Phân tích Features & Lấy Biểu đồ Elbow (để chọn K)
+            </button>
+
+            <hr style="margin-top: 30px; margin-bottom: 30px;">
+
+            {% if results and results.plot_img %}
+            
+                <h4>Bước 2: Xem kết quả phân tích Features</h4>
+                <details>
+                    <summary>Xem Dữ liệu đã chọn (5 dòng đầu)</summary>
+                    <div class="details-content">
+                        <p>Các features đã chọn: <strong>{{ results.selected_cols | join(', ') }}</strong></p>
+                        {{ results.selected_data_html | safe }}
+                    </div>
+                </details>
+
+                <details>
+                    <summary>Xem Dữ liệu đã Chuẩn hóa (5 dòng đầu)</summary>
+                    <div class="details-content">
+                        <p>Dữ liệu đã được chuẩn hóa (StandardScaler) để thuật toán K-Means hoạt động chính xác.</p>
+                        {{ results.scaled_data_html | safe }}
+                    </div>
+                </details>
+
+                <details open> <summary>Biểu đồ Elbow (Gợi ý K)</summary>
+                    <div class="details-content">
+                        <p>Dựa vào biểu đồ này, hãy tìm điểm "khuỷu tay" để quyết định số K tối ưu.</p>
+                        <img src="{{ results.plot_img | safe }}" alt="Elbow Plot" style="width: 500px; max-width: 100%;">
+                    </div>
+                </details>
+                
+                <hr style="margin-top: 30px; margin-bottom: 30px;">
+                
+                <h4>Bước 3: Chọn K và Chạy Phân cụm</h4>
+                <p>Sau khi xem biểu đồ Elbow, hãy nhập số K bạn cho là tối ưu vào ô dưới:</p>
+                <label for="k_clusters" style="font-weight: bold;">Số cụm (K) (từ 2-10):</label>
+                <input type="number" id="k_clusters" name="k_clusters" class="form-control"
+                       value="{{ results.selected_k if results else 3 }}" min="2" max="10" required>
+
+                <button type="submit" name="action" value="run_cluster" class="btn-submit">
+                    Chạy Phân tích Tùy chỉnh với K = {{ results.selected_k if results else 3 }}
+                </button>
+            
+            {% endif %} {% if error_msg %}
+                <p class="error-msg">LỖI: {{ error_msg }}</p>
+            {% endif %}
+
+        </form> {% if results and results.table_html %}
+        <div class="cluster-section">
+            <h3>Kết quả Phân cụm Cuối cùng</h3>
+            <p>Đã chạy K-Means với <strong>K = {{ results.selected_k }}</strong> cho các features: <strong>{{ results.selected_cols | join(', ') }}</strong></p>
+            
+            <details open>
+                <summary>Bảng Đặc điểm Trung bình các Cụm</summary>
+                <div class="details-content">
+                    {{ results.table_html | safe }}
+                </div>
+            </details>
+        </div>
+        {% endif %} </div>
+
+    <script>
+        // Hàm trợ giúp để tick vào các ô checkbox
+        function setCheckboxes(preset) {
+            // 1. Lấy tất cả checkbox trong form
+            const allCheckboxes = document.querySelectorAll('#featuresGrid input[type="checkbox"]');
+            
+            // 2. Bỏ tick tất cả
+            allCheckboxes.forEach(cb => {
+                cb.checked = false;
+            });
+
+            // 3. Định nghĩa các bộ preset
+            const presets = {
+                'hoc_tap': ['G1', 'G2', 'G3', 'studytime', 'failures', 'absences'],
+                'loi_song': ['freetime', 'goout', 'Dalc', 'Walc', 'health', 'famrel'],
+                'gia_dinh': ['Medu', 'Fedu', 'famsup', 'paid', 'internet', 'famrel']
+            };
+
+            // 4. Lấy bộ feature tương ứng
+            const featuresToSelect = presets[preset];
+
+            // 5. Tick vào các ô tương ứng
+            if (featuresToSelect) {
+                featuresToSelect.forEach(featureName => {
+                    const cbToTick = document.querySelector(`input[type="checkbox"][value="${featureName}"]`);
+                    if (cbToTick) {
+                        cbToTick.checked = true;
+                    }
+                });
+            }
+        }
+
+        // 6. Gán sự kiện click cho 3 nút
+        document.getElementById('preset1').addEventListener('click', function() {
+            setCheckboxes('hoc_tap');
+        });
+        document.getElementById('preset2').addEventListener('click', function() {
+            setCheckboxes('loi_song');
+        });
+        document.getElementById('preset3').addEventListener('click', function() {
+            setCheckboxes('gia_dinh');
+        });
+
+        // (Tùy chọn) Cập nhật số K trên nút màu xanh lá
+        const k_input = document.getElementById('k_clusters');
+        const run_btn = document.querySelector('button[value="run_cluster"]');
+        if (k_input && run_btn) {
+            k_input.addEventListener('input', function() {
+                run_btn.innerText = `Chạy Phân tích Tùy chỉnh với K = ${this.value}`;
+            });
+        }
+    </script>
+    </body>
+</html>

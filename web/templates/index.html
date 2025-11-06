@@ -5,7 +5,7 @@
     <style>
       body {
         font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-        margin: 40px;
+        margin: 0px;
         background-color: #f8f9fa;
       }
       .container {
@@ -112,9 +112,31 @@
         margin-top: 15px;
         text-align: center;
       }
+      .navbar {
+        background-color: #343a40;
+        padding: 15px 30px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        display: flex;
+        justify-content: center;
+        margin-bottom: 20px; /* Thêm để đẩy container xuống */
+      }
+      .navbar a {
+          color: white;
+          text-decoration: none;
+          font-size: 18px;
+          padding: 10px 20px;
+          border-radius: 5px;
+          transition: background-color 0.3s;
+      }
+      .navbar a:hover { background-color: #495057; }
+      .navbar a.active { background-color: #007bff; font-weight: bold; }
     </style>
   </head>
   <body>
+    <div class="navbar">
+      <a href="/" class="active">Trang Dự Đoán (Hồi quy)</a>
+      <a href="/interactive">Trang Phân Cụm (K-Means)</a>
+    </div>
     <div class="container">
       <h2>Công Cụ Dự Đoán & Phân Tích Điểm Cuối Kỳ (G3)</h2>
 
